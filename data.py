@@ -11,6 +11,7 @@ CHORD_FILENAME = 'salami_chords.txt'    # Name of Billboard annotation files
 ALLOW_ROOT_ANNOTATIONS = False          # Whether to allow
 ALLOW_SECTION_ANNOTATIONS = False       # Whether to consider section types (e.g. verse, chorus) as different tokens
 token_dict = {}                         # Tokens for the chords and annotations
+chord_freq = {}
 
 
 def parse_key_line(line):
@@ -61,7 +62,9 @@ def parse_bars(bars, key, metre):
                 chords[i] = 'N/C' # A special token standing for "no chord"
             if not chords[i] in token_dict:  # If we don't have a token for this chord, add one
                 token_dict[chords[i]] = len(token_dict)
+                chord_freq[chords[i]] = 0
             sequence.append(token_dict[chords[i]])  # Add the section annotation to the list of chords
+            chord_freq[chords[i]] += 1
     return sequence
 
 
@@ -84,6 +87,8 @@ def parse_chords_line(line, key, metre):
             section = "Section" # General indicator for new section
         if not section in token_dict: # If we don't have a token for this section definition, add one
             token_dict[section] = len(token_dict)
+            chord_freq[section] = 0
+        chord_freq[section] += 1
         phrase.append(token_dict[section]) # Add the section annotation to the list of chords
 
     # Get the bars for the line
@@ -132,15 +137,23 @@ def preprocess_data():
     Parses the data in the McGill Billboard dataset to get a sequence of chords and structural annotations for each song
     '''
     chord_seqs = []
+    max_len = 0
     for f in os.scandir(RAW_DATA_PATH): # Iterate over all directories
         if f.is_dir() and os.path.exists(f.path + "/" + CHORD_FILENAME):
             chord_seq = read_chord_seq(f.path)
             chord_seqs.append(chord_seq)
-    with open("../data/dataset.csv", "w") as f:
-        writer = csv.writer(f)
-        writer.writerows(chord_seqs)
+            if len(chord_seq) > max_len:
+                max_len = len(chord_seq)
+
+    dataset = np.ones((len(chord_seqs), max_len)) * token_dict['end']
+    for i in range(len(chord_seqs)):
+        for j in range(len(chord_seqs[i])):
+            dataset[i][j] = chord_seqs[i][j]
+
+    chord_freq_sorted = sorted(chord_freq, key=chord_freq.get, reverse=True)
+    np.save('../data/dataset.npy', dataset)
     np.save('config/tokens.npy', token_dict)
-    #tokens = np.load('config/tokens.npy', allow_pickle=True).item()
+    np.save('config/chord_freq.npy', chord_freq)
 
 if __name__=="__main__":
     preprocess_data()
