@@ -1,8 +1,9 @@
-import csv
 import os
 import re
 import utils
 import numpy as np
+import json
+from keras.utils import to_categorical
 
 
 RAW_DATA_PATH = '../downloads/'         # Path of McGill Billboard Dataset
@@ -10,8 +11,11 @@ DATASET_PATH = '../data/'               # Path to output parsed dataset
 CHORD_FILENAME = 'salami_chords.txt'    # Name of Billboard annotation files
 ALLOW_ROOT_ANNOTATIONS = False          # Whether to allow
 ALLOW_SECTION_ANNOTATIONS = False       # Whether to consider section types (e.g. verse, chorus) as different tokens
+ALLOW_BRACKET_EXTENSIONS = False        # Whether to consider bracketed chord extensions
+SEQ_LENGTH = 8
 token_dict = {}                         # Tokens for the chords and annotations
 chord_freq = {}
+reverse_token_dict = {}
 
 
 def parse_key_line(line):
@@ -58,6 +62,9 @@ def parse_bars(bars, key, metre):
                 if not ALLOW_ROOT_ANNOTATIONS: # If alternative root annotations not allowed, remove them
                     if '/' in chords[i]:
                         chords[i] = chords[i][0:chords[i].find('/')]
+                if not ALLOW_BRACKET_EXTENSIONS:
+                    if '(' in chords[i]:
+                        chords[i] = chords[i][0:chords[i].find('(')]
             else:
                 chords[i] = 'N/C' # A special token standing for "no chord"
             if not chords[i] in token_dict:  # If we don't have a token for this chord, add one
@@ -145,15 +152,33 @@ def preprocess_data():
             if len(chord_seq) > max_len:
                 max_len = len(chord_seq)
 
-    dataset = np.ones((len(chord_seqs), max_len)) * token_dict['end']
+    n_vocab = len(token_dict)
+    n_seqs = len(chord_seqs)
+    seqs = []
+    outputs = [] # Output predicted character
     for i in range(len(chord_seqs)):
-        for j in range(len(chord_seqs[i])):
-            dataset[i][j] = chord_seqs[i][j]
+        for j in range(0, len(chord_seqs[i]) - SEQ_LENGTH, 2):
+            x = chord_seqs[i][j : j + SEQ_LENGTH]
+            y = chord_seqs[i][j + SEQ_LENGTH]
+            seqs.append(np.expand_dims(np.asarray(x), axis=1))
+            outputs.append(y)
+    X = np.stack(seqs)
+    print(X.shape)
+    X = X / float(n_vocab) # Normalize inputs
+    print(np.max(outputs))
+
+    Y = to_categorical(outputs, num_classes=len(token_dict))
 
     chord_freq_sorted = sorted(chord_freq, key=chord_freq.get, reverse=True)
-    np.save('../data/dataset.npy', dataset)
-    np.save('config/tokens.npy', token_dict)
-    np.save('config/chord_freq.npy', chord_freq)
+    reverse_token_dict = dict((v, k) for k, v in token_dict.items())
+    np.save('../data/X.npy', X)
+    np.save('../data/Y.npy', Y)
+    with open('./config/tokens.json', 'w') as f:
+        json.dump(token_dict, f)
+    with open('./config/tokens_reverse.json', 'w') as f:
+        json.dump(reverse_token_dict, f)
+    with open('./config/chord_freq.json', 'w') as f:
+        json.dump(chord_freq, f)
 
 if __name__=="__main__":
     preprocess_data()
